@@ -1,12 +1,17 @@
 import { describe, it, expect } from 'vitest'
-import { breakdownByField } from './scoring'
-import type { MCQuestion, McqPick } from '../data/types'
+import {
+  breakdownByField,
+  scoreAllOpen,
+  scoreMcqs,
+  scoreOpenSelf,
+} from './scoring'
+import type { MCQuestion, McqPick, OpenSelfGrade } from '../data/types'
 
 function q(
   id: string,
   week: number,
   topic: string,
-  correct: 'A' | 'B' = 'A',
+  correct: 'A' | 'B' | 'C' | 'D' = 'A',
 ): MCQuestion {
   return {
     id,
@@ -84,5 +89,144 @@ describe('breakdownByField', () => {
 
   it('returns an empty array for no picks', () => {
     expect(breakdownByField([], questions, 'week')).toEqual([])
+  })
+})
+
+describe('scoreMcqs', () => {
+  const questions: MCQuestion[] = [
+    q('m1', 2, 'Alpha', 'A'),
+    q('m2', 2, 'Alpha', 'B'),
+    q('m3', 3, 'Beta', 'A'),
+    q('m4', 3, 'Beta', 'A'),
+  ]
+
+  it('counts correct, wrong, and unanswered and scales score to 20', () => {
+    const picks: McqPick[] = [
+      { questionId: 'm1', answer: 'A' }, // correct
+      { questionId: 'm2', answer: 'A' }, // wrong (correct is B)
+      { questionId: 'm3', answer: null }, // unanswered
+      { questionId: 'm4', answer: 'A' }, // correct
+    ]
+    const result = scoreMcqs(picks, questions)
+    expect(result.correct).toBe(2)
+    expect(result.total).toBe(4)
+    expect(result.score).toBe((2 / 4) * 20)
+    expect(result.wrong.map((q) => q.id)).toEqual(['m2'])
+    expect(result.unanswered.map((q) => q.id)).toEqual(['m3'])
+  })
+
+  it('returns zero score for empty picks without dividing by zero', () => {
+    const result = scoreMcqs([], questions)
+    expect(result).toEqual({
+      correct: 0,
+      total: 0,
+      score: 0,
+      wrong: [],
+      unanswered: [],
+    })
+  })
+
+  it('skips picks whose questionId is not in the question list', () => {
+    const picks: McqPick[] = [
+      { questionId: 'm1', answer: 'A' },
+      { questionId: 'ghost', answer: 'A' },
+    ]
+    const result = scoreMcqs(picks, questions)
+    expect(result.correct).toBe(1)
+    // ghost is skipped entirely — does not count toward total
+    expect(result.wrong).toEqual([])
+    expect(result.unanswered).toEqual([])
+  })
+
+  it('awards full 20 when all answers are correct', () => {
+    const picks: McqPick[] = [
+      { questionId: 'm1', answer: 'A' },
+      { questionId: 'm2', answer: 'B' },
+      { questionId: 'm3', answer: 'A' },
+      { questionId: 'm4', answer: 'A' },
+    ]
+    expect(scoreMcqs(picks, questions).score).toBe(20)
+  })
+})
+
+describe('scoreOpenSelf', () => {
+  const base: OpenSelfGrade = {
+    questionId: 'o1',
+    coveredKeyPoints: 0,
+    totalKeyPoints: 0,
+    grammarOk: false,
+    punctuationOk: false,
+  }
+
+  it('returns 0 when nothing is covered and both fail', () => {
+    expect(scoreOpenSelf(base)).toBe(0)
+  })
+
+  it('awards full 10 when all content points covered and both pass', () => {
+    expect(
+      scoreOpenSelf({
+        ...base,
+        coveredKeyPoints: 4,
+        totalKeyPoints: 4,
+        grammarOk: true,
+        punctuationOk: true,
+      }),
+    ).toBe(10)
+  })
+
+  it('scales content proportionally over 6 points', () => {
+    expect(
+      scoreOpenSelf({
+        ...base,
+        coveredKeyPoints: 2,
+        totalKeyPoints: 4,
+      }),
+    ).toBe(3) // (2/4) * 6
+  })
+
+  it('adds 2 each for grammar and punctuation passes', () => {
+    expect(scoreOpenSelf({ ...base, grammarOk: true })).toBe(2)
+    expect(scoreOpenSelf({ ...base, punctuationOk: true })).toBe(2)
+    expect(
+      scoreOpenSelf({ ...base, grammarOk: true, punctuationOk: true }),
+    ).toBe(4)
+  })
+
+  it('treats totalKeyPoints=0 as 0 content (no division by zero)', () => {
+    expect(
+      scoreOpenSelf({
+        ...base,
+        coveredKeyPoints: 0,
+        totalKeyPoints: 0,
+        grammarOk: true,
+        punctuationOk: true,
+      }),
+    ).toBe(4)
+  })
+})
+
+describe('scoreAllOpen', () => {
+  it('sums per-question open scores', () => {
+    const grades: OpenSelfGrade[] = [
+      {
+        questionId: 'o1',
+        coveredKeyPoints: 4,
+        totalKeyPoints: 4,
+        grammarOk: true,
+        punctuationOk: true,
+      }, // 10
+      {
+        questionId: 'o2',
+        coveredKeyPoints: 1,
+        totalKeyPoints: 2,
+        grammarOk: false,
+        punctuationOk: true,
+      }, // 3 + 0 + 2 = 5
+    ]
+    expect(scoreAllOpen(grades)).toBe(15)
+  })
+
+  it('returns 0 for empty input', () => {
+    expect(scoreAllOpen([])).toBe(0)
   })
 })
