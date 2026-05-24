@@ -8,9 +8,11 @@ import {
   Result,
   Space,
   Switch,
+  Table,
   Tag,
   Typography,
 } from 'antd'
+import type { ColumnsType } from 'antd/es/table'
 import { Link, useSearchParams } from 'react-router-dom'
 import { mcqQuestions, openQuestions } from '../data/questions'
 import type {
@@ -18,7 +20,12 @@ import type {
   OpenQuestion,
   OpenSelfGrade,
 } from '../data/types'
-import { scoreAllOpen, scoreMcqs } from '../utils/scoring'
+import {
+  breakdownByField,
+  scoreAllOpen,
+  scoreMcqs,
+  type BreakdownRow,
+} from '../utils/scoring'
 import { useExamHistory } from '../hooks/useExamHistory'
 import { ResultSummary } from '../components/ResultSummary'
 
@@ -122,6 +129,72 @@ function OpenGrader({
   )
 }
 
+function BreakdownTables({
+  byWeek,
+  byTopic,
+}: {
+  byWeek: BreakdownRow<number>[]
+  byTopic: BreakdownRow<string>[]
+}) {
+  if (byWeek.length === 0 && byTopic.length === 0) return null
+
+  const rowClassName = (row: { accuracy: number }) =>
+    row.accuracy < 0.6 ? 'breakdown-row-low' : ''
+
+  const weekColumns: ColumnsType<BreakdownRow<number>> = [
+    { title: 'Апта', dataIndex: 'key', key: 'key', width: 80 },
+    { title: 'Жауап', dataIndex: 'total', key: 'total', width: 90 },
+    { title: 'Дұрыс', dataIndex: 'correct', key: 'correct', width: 90 },
+    {
+      title: 'Дәлдік',
+      dataIndex: 'accuracy',
+      key: 'accuracy',
+      render: (a: number) => `${Math.round(a * 100)}%`,
+    },
+  ]
+  const topicColumns: ColumnsType<BreakdownRow<string>> = [
+    { title: 'Тақырып', dataIndex: 'key', key: 'key' },
+    { title: 'Жауап', dataIndex: 'total', key: 'total', width: 90 },
+    { title: 'Дұрыс', dataIndex: 'correct', key: 'correct', width: 90 },
+    {
+      title: 'Дәлдік',
+      dataIndex: 'accuracy',
+      key: 'accuracy',
+      width: 110,
+      render: (a: number) => `${Math.round(a * 100)}%`,
+    },
+  ]
+
+  return (
+    <>
+      <style>{`.breakdown-row-low > td { background-color: #fff1f0 !important; color: #a8071a; }`}</style>
+      <Title level={4}>Нәтиже талдауы</Title>
+      <Title level={5} style={{ marginBottom: 8 }}>
+        Апта бойынша
+      </Title>
+      <Table
+        size="small"
+        rowKey="key"
+        pagination={false}
+        columns={weekColumns}
+        dataSource={byWeek}
+        rowClassName={rowClassName}
+      />
+      <Title level={5} style={{ marginBottom: 8, marginTop: 16 }}>
+        Тақырып бойынша
+      </Title>
+      <Table
+        size="small"
+        rowKey="key"
+        pagination={false}
+        columns={topicColumns}
+        dataSource={byTopic}
+        rowClassName={rowClassName}
+      />
+    </>
+  )
+}
+
 export function ExamResult() {
   const [params] = useSearchParams()
   const id = params.get('id')
@@ -156,6 +229,8 @@ export function ExamResult() {
     .map((p) => openById.get(p.questionId))
     .filter((q): q is OpenQuestion => Boolean(q))
   const mcqResult = scoreMcqs(attempt.mcqPicks, mcqs)
+  const byWeek = breakdownByField(attempt.mcqPicks, mcqs, 'week')
+  const byTopic = breakdownByField(attempt.mcqPicks, mcqs, 'topic')
 
   const selfGrades: OpenSelfGrade[] = opens.map((q) => {
     const s = grades[q.id]
@@ -226,6 +301,8 @@ export function ExamResult() {
         <Button type="primary" onClick={saveScore}>
           Бағалауды сақтау
         </Button>
+
+        <BreakdownTables byWeek={byWeek} byTopic={byTopic} />
 
         {mcqResult.wrong.length > 0 && (
           <>
